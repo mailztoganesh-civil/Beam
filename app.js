@@ -59,14 +59,18 @@ function updateEILabels(){
 }
 
 /* ---------------- page navigation ---------------- */
+let resultsBackTarget = 'page-input';
+
 function showPage(name){
-  ['page-select','page-input','page-results'].forEach(id=>{
+  ['page-select','page-custom','page-input','page-results'].forEach(id=>{
     document.getElementById(id).classList.toggle('active', id===name);
   });
   window.scrollTo({top:0, behavior:'smooth'});
 }
 document.getElementById('backToSelect').addEventListener('click', ()=> showPage('page-select'));
-document.getElementById('backToInput').addEventListener('click', ()=> showPage('page-input'));
+document.getElementById('backToInput').addEventListener('click', ()=> showPage(resultsBackTarget));
+document.getElementById('openCustomBtn').addEventListener('click', ()=> { showPage('page-custom'); buildSpanCards(); });
+document.getElementById('backFromCustom').addEventListener('click', ()=> showPage('page-select'));
 
 /* ---------------- number formatting ---------------- */
 function fmt(v){
@@ -173,6 +177,7 @@ function buildBeamList(){
 function selectBeam(id){
   currentBeam = BEAMS.find(b=>b.id===id);
   lastCalc=null;
+  resultsBackTarget = 'page-input';
   buildBeamList();
   showPage('page-input');
   renderInputFigure(currentBeam, false);
@@ -339,7 +344,9 @@ document.getElementById('calcBtn').addEventListener('click', function(){
 });
 
 function renderResults(p, result, Vext, Mext, total){
-  document.getElementById('resTitle').textContent = `Fig. ${currentBeam.id.replace('f','')} — ${currentBeam.name}`;
+  document.getElementById('resTitle').textContent = currentBeam.id==='custom'
+    ? currentBeam.name
+    : `Fig. ${currentBeam.id.replace('f','')} — ${currentBeam.name}`;
 
   const grid=document.getElementById('resultGrid');
   grid.innerHTML='';
@@ -638,6 +645,225 @@ function beamXFromClientX(clientX){
   });
   wrap.addEventListener('pointercancel', function(){ dragging = false; });
 })();
+
+/* ============================================================
+   Custom continuous beam — three-moment equation solver
+   ============================================================ */
+
+function simpleUDL(w, L){
+  return { Vx: x=> w*(L/2-x), Mx: x=> (w*x/2)*(L-x) };
+}
+function simplePoint(P, a, L){
+  const b=L-a, R1=P*b/L, R2=P*a/L;
+  return { Vx: x=> x<a? R1 : -R2, Mx: x=> x<=a? R1*x : R2*(L-x) };
+}
+function spanSimpleFns(span){
+  if(span.type==='udl') return simpleUDL(span.w, span.L);
+  if(span.type==='point') return simplePoint(span.P, span.a, span.L);
+  return { Vx:()=>0, Mx:()=>0 };
+}
+// 6*A*x̄/L term for the three-moment equation, x̄ measured from the LEFT end of the span
+function spanTermLeft(span){
+  let t=0;
+  if(span.type==='udl') t += span.w*Math.pow(span.L,3)/4;
+  if(span.type==='point') t += span.P*span.a*(span.L*span.L-span.a*span.a)/span.L;
+  return t;
+}
+// same term, x̄ measured from the RIGHT end of the span
+function spanTermRight(span){
+  let t=0;
+  if(span.type==='udl') t += span.w*Math.pow(span.L,3)/4;
+  if(span.type==='point'){ const b=span.L-span.a; t += span.P*b*(span.L*span.L-b*b)/span.L; }
+  return t;
+}
+function thomasSolve(a,b,c,d){
+  const n=b.length;
+  const cp=new Array(n), dp=new Array(n);
+  cp[0]=c[0]/b[0]; dp[0]=d[0]/b[0];
+  for(let i=1;i<n;i++){
+    const m = b[i]-a[i]*cp[i-1];
+    cp[i] = c[i]/m;
+    dp[i] = (d[i]-a[i]*dp[i-1])/m;
+  }
+  const x=new Array(n);
+  x[n-1]=dp[n-1];
+  for(let i=n-2;i>=0;i--) x[i]=dp[i]-cp[i]*x[i+1];
+  return x;
+}
+function solveFromMoments(spans, M){
+  const n=spans.length;
+  const spanFns = spans.map(spanSimpleFns);
+  const Vtotal = spans.map((sp,i)=> x=> spanFns[i].Vx(x) + (M[i+1]-M[i])/sp.L );
+  const Mtotal = spans.map((sp,i)=> x=> spanFns[i].Mx(x) + M[i]*(1-x/sp.L) + M[i+1]*(x/sp.L) );
+  const R = new Array(n+1).fill(0);
+  for(let i=0;i<=n;i++){
+    let leftV=0, rightV=0;
+    if(i>0) leftV = Vtotal[i-1](spans[i-1].L);
+    if(i<n) rightV = Vtotal[i](0);
+    R[i] = rightV-leftV;
+  }
+  return {R, Vtotal, Mtotal, M};
+}
+// Simply-supported ends (M at first and last support = 0); interior support
+// moments solved via the classical three-moment (Clapeyron) equation.
+function solveContinuousBeam(spans){
+  const n = spans.length;
+  const nUnk = n-1;
+  if(nUnk<=0) return solveFromMoments(spans, new Array(n+1).fill(0));
+  const a=new Array(nUnk).fill(0), b=new Array(nUnk).fill(0), c=new Array(nUnk).fill(0), d=new Array(nUnk).fill(0);
+  for(let k=0;k<nUnk;k++){
+    const i=k+1;
+    const Li=spans[i-1].L, Lip1=spans[i].L;
+    b[k] = 2*(Li+Lip1);
+    if(k-1>=0) a[k]=Li;
+    if(k+1<nUnk) c[k]=Lip1;
+    d[k] = -(spanTermRight(spans[i-1]) + spanTermLeft(spans[i]));
+  }
+  const M = thomasSolve(a,b,c,d);
+  const Mfull = [0, ...M, 0];
+  return solveFromMoments(spans, Mfull);
+}
+
+function buildCustomBeam(spans){
+  const total = spans.reduce((s,sp)=>s+sp.L,0);
+  const cum=[0]; spans.forEach(sp=>cum.push(cum[cum.length-1]+sp.L));
+  const supports = cum.map(x=>({x, type:'pin'}));
+  const loads=[];
+  spans.forEach((sp,i)=>{
+    const x0=cum[i], x1=cum[i+1];
+    if(sp.type==='udl') loads.push({type:'udl', x1:x0, x2:x1, val:sp.w, key:`w${i}`});
+    if(sp.type==='point') loads.push({type:'point', x:x0+sp.a, val:sp.P, key:`P${i}`});
+  });
+  const breakpoints = [...cum];
+  spans.forEach((sp,i)=>{ if(sp.type==='point') breakpoints.push(cum[i]+sp.a); });
+  return {
+    id:'custom', group:'Custom', name:`Custom continuous beam — ${spans.length} spans`,
+    totalLength:()=>total,
+    supports:()=>supports,
+    loads:()=>loads,
+    calc(){
+      const sol = solveContinuousBeam(spans);
+      const R = sol.R.map((v,i)=>({l:`R${i+1}`, v}));
+      const Vx = x=>{
+        for(let i=0;i<spans.length;i++){
+          if(x<=cum[i+1]+1e-9) return sol.Vtotal[i](Math.max(0,x-cum[i]));
+        }
+        return sol.Vtotal[spans.length-1](spans[spans.length-1].L);
+      };
+      const Mx = x=>{
+        for(let i=0;i<spans.length;i++){
+          if(x<=cum[i+1]+1e-9) return sol.Mtotal[i](Math.max(0,x-cum[i]));
+        }
+        return sol.Mtotal[spans.length-1](spans[spans.length-1].L);
+      };
+      return {R, Vx, Mx, breakpoints};
+    }
+  };
+}
+
+/* ---------------- custom beam builder UI ---------------- */
+document.getElementById('spanCount').addEventListener('change', buildSpanCards);
+
+function buildSpanCards(){
+  const n = parseInt(document.getElementById('spanCount').value, 10);
+  const wrap = document.getElementById('spanCards');
+  const prev = {}; // keep values already typed when span count changes
+  wrap.querySelectorAll('.span-card').forEach((card,i)=>{
+    prev[i] = {
+      L: card.querySelector('[data-f="L"]').value,
+      type: card.getAttribute('data-type'),
+      w: card.querySelector('[data-f="w"]') ? card.querySelector('[data-f="w"]').value : '',
+      P: card.querySelector('[data-f="P"]') ? card.querySelector('[data-f="P"]').value : '',
+      a: card.querySelector('[data-f="a"]') ? card.querySelector('[data-f="a"]').value : ''
+    };
+  });
+  wrap.innerHTML='';
+  for(let i=0;i<n;i++){
+    const type = (prev[i] && prev[i].type) || 'none';
+    const card=document.createElement('div');
+    card.className='span-card';
+    card.setAttribute('data-type', type);
+    const lenU=currentUnit.length, loadU=currentUnit.load, forceU=currentUnit.force;
+    card.innerHTML = `
+      <div class="span-head">Span ${i+1}</div>
+      <div class="field-grid">
+        <div class="field"><label>Length (${lenU})</label><input type="number" step="any" data-f="L" value="${prev[i]?prev[i].L:''}"></div>
+      </div>
+      <div class="load-type-row">
+        <button type="button" class="load-type-btn" data-type-btn="none">None</button>
+        <button type="button" class="load-type-btn" data-type-btn="udl">UDL</button>
+        <button type="button" class="load-type-btn" data-type-btn="point">Point</button>
+      </div>
+      <div class="field-grid span-load-fields" data-fields="udl">
+        <div class="field"><label>Load w (${loadU})</label><input type="number" step="any" data-f="w" value="${prev[i]?prev[i].w:''}"></div>
+      </div>
+      <div class="field-grid span-load-fields" data-fields="point">
+        <div class="field"><label>Load P (${forceU})</label><input type="number" step="any" data-f="P" value="${prev[i]?prev[i].P:''}"></div>
+        <div class="field"><label>Position a, from left (${lenU})</label><input type="number" step="any" data-f="a" value="${prev[i]?prev[i].a:''}"></div>
+      </div>
+    `;
+    wrap.appendChild(card);
+    const btns = card.querySelectorAll('.load-type-btn');
+    function setType(t){
+      card.setAttribute('data-type', t);
+      btns.forEach(b=> b.classList.toggle('active', b.getAttribute('data-type-btn')===t));
+      card.querySelectorAll('.span-load-fields').forEach(f=>{
+        f.classList.toggle('show', f.getAttribute('data-fields')===t);
+      });
+    }
+    btns.forEach(b=> b.addEventListener('click', ()=> setType(b.getAttribute('data-type-btn'))));
+    setType(type);
+  }
+}
+
+document.getElementById('customCalcBtn').addEventListener('click', function(){
+  const errBox = document.getElementById('customErrorBox');
+  errBox.classList.remove('show');
+  const cards = Array.from(document.querySelectorAll('#spanCards .span-card'));
+  const spans = [];
+  for(let i=0;i<cards.length;i++){
+    const card = cards[i];
+    const L = parseFloat(card.querySelector('[data-f="L"]').value);
+    if(isNaN(L) || L<=0){
+      errBox.textContent = `Enter a valid length for span ${i+1}.`;
+      errBox.classList.add('show');
+      return;
+    }
+    const type = card.getAttribute('data-type');
+    const span = {L, type};
+    if(type==='udl'){
+      const w = parseFloat(card.querySelector('[data-f="w"]').value);
+      if(isNaN(w)){ errBox.textContent = `Enter a load value for span ${i+1}.`; errBox.classList.add('show'); return; }
+      span.w = w;
+    } else if(type==='point'){
+      const P = parseFloat(card.querySelector('[data-f="P"]').value);
+      const a = parseFloat(card.querySelector('[data-f="a"]').value);
+      if(isNaN(P) || isNaN(a)){ errBox.textContent = `Enter load and position for span ${i+1}.`; errBox.classList.add('show'); return; }
+      if(a<0 || a>L){ errBox.textContent = `Span ${i+1}: position "a" must be between 0 and the span length.`; errBox.classList.add('show'); return; }
+      span.P = P; span.a = a;
+    }
+    spans.push(span);
+  }
+
+  currentBeam = buildCustomBeam(spans);
+  const p = {};
+  let result;
+  try{
+    result = currentBeam.calc(p);
+  }catch(e){
+    errBox.textContent = 'Could not solve this configuration — check the span values.';
+    errBox.classList.add('show');
+    return;
+  }
+  const total = currentBeam.totalLength(p);
+  const Vext = findExtreme(result.Vx, total, result.breakpoints);
+  const Mext = findExtreme(result.Mx, total, result.breakpoints);
+
+  lastCalc = {p, result, Vext, Mext, total};
+  resultsBackTarget = 'page-custom';
+  renderResults(p, result, Vext, Mext, total);
+  showPage('page-results');
+});
 
 /* init */
 buildUnitSelect();

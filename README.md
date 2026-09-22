@@ -2,7 +2,11 @@
 
 A mobile-friendly, offline-capable calculator for the 32 standard beam and
 loading conditions in the American Wood Council's **Design Aid No. 6 –
-Beam Design Formulas with Shear and Moment Diagrams** (2005/2007).
+Beam Design Formulas with Shear and Moment Diagrams** (2005/2007), plus a
+**custom continuous beam builder** (2–6 spans, any mix of UDL/point loads
+per span, solved with the three-moment equation) for cases outside that
+fixed set of 32 — e.g. a 3+ span continuous beam with loading on alternating
+spans.
 
 Select a beam and loading configuration, enter the span/length and load
 values, and get reactions, maximum shear, maximum moment, and (where a

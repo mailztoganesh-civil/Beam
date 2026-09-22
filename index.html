@@ -238,6 +238,41 @@
   .fig-input-box.filled input{border-color:#7FD08A;}
   .fig-caption{font-size:0.72rem;color:var(--ink-soft);margin-top:8px;line-height:1.5;}
 
+  /* Custom continuous beam builder */
+  .custom-cta{
+    margin-top:12px;
+    width:100%;
+    padding:12px;
+    background:var(--card);
+    border:1.5px dashed var(--blue-mid);
+    border-radius:4px;
+    font-family:inherit;
+    font-size:0.82rem;
+    font-weight:600;
+    color:var(--blue-mid);
+    cursor:pointer;
+    text-align:center;
+  }
+  .span-count-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+  .span-count-row select{width:80px;}
+  .span-card{
+    border:1px solid var(--line);
+    border-radius:4px;
+    background:var(--card);
+    padding:12px;
+    margin-bottom:10px;
+  }
+  .span-card .span-head{font-size:0.78rem;font-weight:700;color:var(--blue-deep);margin-bottom:8px;}
+  .span-card .field-grid{margin-bottom:8px;}
+  .load-type-row{display:flex;gap:6px;margin-bottom:8px;}
+  .load-type-btn{
+    flex:1;padding:7px 4px;font-size:0.74rem;font-family:inherit;font-weight:500;
+    border:1px solid var(--line);border-radius:3px;background:#fff;color:var(--ink-soft);cursor:pointer;
+  }
+  .load-type-btn.active{background:var(--blue-deep);color:#fff;border-color:var(--blue-deep);}
+  .span-load-fields{display:none;}
+  .span-load-fields.show{display:grid;}
+
   /* Results */
   .result-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .result-card{
@@ -301,7 +336,31 @@
       <h2 class="section-title">SELECT BEAM &amp; LOADING</h2>
       <div class="cats" id="cats"></div>
       <div class="beam-list" id="beamList"></div>
+      <button class="custom-cta" id="openCustomBtn">+ Build a custom continuous beam (3+ spans, any loading pattern)</button>
     </section>
+  </div>
+
+  <!-- PAGE 1b — custom continuous beam builder -->
+  <div class="page" id="page-custom">
+    <div class="back-row"><button class="back-btn" id="backFromCustom">Change beam</button></div>
+    <h2 class="fig-title">Custom continuous beam</h2>
+    <p class="fig-sub">Any number of spans on simple supports. Set each span's length and loading — the app solves it with the three-moment equation.</p>
+
+    <div class="span-count-row">
+      <label style="font-size:0.8rem;color:var(--ink-soft);font-weight:500;">Number of spans</label>
+      <select id="spanCount">
+        <option value="2">2</option>
+        <option value="3" selected>3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+      </select>
+    </div>
+
+    <div id="spanCards"></div>
+
+    <div class="error" id="customErrorBox"></div>
+    <button class="calc" id="customCalcBtn">Calculate</button>
   </div>
 
   <!-- PAGE 2 — inputs on the figure -->
